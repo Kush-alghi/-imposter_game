@@ -6,7 +6,7 @@ import {
   ChevronRight, Play, Loader2, BarChart2,
   Activity, Check, Copy, ExternalLink,
   Skull, User, Shield, Zap, Database,
-  Cpu, Layers, Settings, X, Info
+  Cpu, Layers, Settings, X, Info, Link
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -663,6 +663,7 @@ export default function App() {
   const [flow, setFlow] = useState<'HOST' | 'JOIN'>('HOST');
   const [preDifficulty, setPreDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD' | 'TOUGH'>('MEDIUM');
   const [copiedId, setCopiedId] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideConfig, setGuideConfig] = useState<{ tab: 'PHASES' | 'BACKEND', phase: string }>({ tab: 'PHASES', phase: 'WORD' });
 
@@ -1149,6 +1150,44 @@ export default function App() {
       <main className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-4 gap-8">
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest leading-none">Secret Access Code</p>
+              <div className="px-2 py-1 bg-red-500/10 border border-red-500/20 text-red-500 rounded-md text-[10px] font-black font-mono animate-pulse uppercase">Lobby Open</div>
+            </div>
+            <div className="space-y-4">
+              <div 
+                className="flex items-center justify-between group cursor-pointer p-4 bg-zinc-950 rounded-xl border border-zinc-900 hover:border-brand/30 transition-all shadow-inner" 
+                onClick={() => {
+                  navigator.clipboard.writeText(roomId);
+                  setCopiedId(true);
+                  setTimeout(() => setCopiedId(false), 2000);
+                }}
+              >
+                <h3 className="text-3xl font-black text-white tracking-[0.2em] font-mono">{roomId}</h3>
+                <button className="p-2 transition-colors text-zinc-600 group-hover:text-brand">
+                  {copiedId ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+                  navigator.clipboard.writeText(url);
+                  setCopiedLink(true);
+                  setTimeout(() => setCopiedLink(false), 2000);
+                }}
+                className="w-full py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white hover:border-zinc-700 transition-all flex items-center justify-center gap-2"
+              >
+                {copiedLink ? (
+                  <><Check className="w-3 h-3 text-green-500" /> Authorized Link Copied</>
+                ) : (
+                  <><Link className="w-3 h-3" /> Copy Mission Invite Link</>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 space-y-4">
             <h3 className="font-black uppercase tracking-tighter flex items-center gap-2 italic">
               <AlertCircle className="w-4 h-4 text-brand" />
               Information
@@ -1247,6 +1286,37 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {gameState?.phase === 'LOBBY' && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="col-span-full py-12 flex flex-col items-center text-center space-y-6 bg-zinc-900/30 rounded-3xl border border-zinc-800 border-dashed"
+              >
+                  <div className="w-20 h-20 bg-zinc-950 rounded-3xl border border-zinc-800 flex items-center justify-center relative overflow-hidden group">
+                      <div className="absolute inset-0 bg-brand/5 animate-pulse opacity-50" />
+                      <Users className="w-10 h-10 text-zinc-700 relative z-10 group-hover:scale-110 transition-transform" />
+                  </div>
+                  <div className="space-y-2">
+                      <h2 className="text-2xl font-black text-white uppercase italic tracking-tight">Mission Staging Ground</h2>
+                      <p className="text-sm text-zinc-500 max-w-xs mx-auto">Waiting for agents to join. Share the <span className="text-brand font-bold italic">Secret Password</span> to authorize their entry.</p>
+                  </div>
+                  
+                  <div className="flex flex-col items-center gap-3">
+                      <div 
+                        className="p-3 px-6 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center gap-4 group cursor-pointer hover:border-brand/50 transition-all shadow-2xl" 
+                        onClick={() => {
+                          navigator.clipboard.writeText(roomId);
+                          setCopiedId(true);
+                          setTimeout(() => setCopiedId(false), 2000);
+                        }}
+                      >
+                          <span className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Entry Key:</span>
+                          <span className="text-3xl font-black text-brand font-mono tracking-[0.3em]">{roomId}</span>
+                          {copiedId ? <Check className="w-4 h-4 text-green-500 ml-2" /> : <Copy className="w-4 h-4 text-zinc-700 group-hover:text-brand ml-2" />}
+                      </div>
+                  </div>
+              </motion.div>
+            )}
             <AnimatePresence mode="popLayout">
               {gameState?.players.map((p) => (
                 <PlayerCard 
