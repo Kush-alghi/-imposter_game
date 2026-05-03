@@ -354,6 +354,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('skip_turn', (playerId) => {
+    // Only the current speaker can skip their turn
+    for (const [roomId, state] of rooms.entries()) {
+      if (state.phase === 'SPEAKING') {
+        const players = Array.from(state.players.values());
+        const currentSpeaker = players[state.currentSpeakerIndex];
+        if (currentSpeaker && currentSpeaker.id === socket.id) {
+          state.timer = 0; // Force advance
+          broadcastState(state);
+          break;
+        }
+      }
+    }
+  });
+
   socket.on('disconnect', () => {
     for (const [roomId, state] of rooms.entries()) {
       if (state.pendingPlayers.has(socket.id)) {

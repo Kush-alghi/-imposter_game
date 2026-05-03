@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Mic, Users, Target, AlertCircle, 
+  Mic, MicOff, Users, Target, AlertCircle, 
   ChevronRight, Play, Loader2, BarChart2,
   Activity, Check, Copy, ExternalLink,
   Skull, User, Shield, Zap, Database,
@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { useRef } from 'react';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -574,6 +573,30 @@ const SuspicionMeter = ({ score }: { score: number }) => {
   );
 };
 
+const MicVisualizer = ({ isActive, isMuted }: { isActive: boolean, isMuted?: boolean }) => {
+  const [bars, setBars] = useState([4, 8, 5, 10, 6]);
+
+  useEffect(() => {
+    if (!isActive || isMuted) return;
+    const interval = setInterval(() => {
+      setBars(prev => prev.map(() => Math.floor(Math.random() * 8) + 4));
+    }, 150);
+    return () => clearInterval(interval);
+  }, [isActive, isMuted]);
+
+  return (
+    <div className="flex items-end gap-0.5 h-4">
+      {bars.map((h, i) => (
+        <motion.div
+          key={i}
+          animate={{ height: (isActive && !isMuted) ? h * 2 : 2 }}
+          className={cn("w-1 rounded-full", (isActive && !isMuted) ? "bg-red-500" : "bg-zinc-800")}
+        />
+      ))}
+    </div>
+  );
+};
+
 const PlayerCard = ({ 
   player, 
   isMe, 
@@ -581,7 +604,9 @@ const PlayerCard = ({
   onVote,
   onKick,
   isHostMe,
-  phase
+  phase,
+  isMuted,
+  onMuteToggle
 }: { 
   player: Player, 
   isMe: boolean, 
@@ -589,63 +614,135 @@ const PlayerCard = ({
   onVote: (id: string) => void,
   onKick: (id: string) => void,
   isHostMe: boolean,
-  phase: Phase
+  phase: Phase,
+  isMuted?: boolean,
+  onMuteToggle?: () => void
 }) => {
+  const isSpeaking = player.isSpeaking;
+
   return (
     <motion.div
       layout
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       className={cn(
-        "relative p-4 rounded-xl border flex flex-col gap-3 transition-all",
-        isMe ? "bg-zinc-900 border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.1)]" : "bg-zinc-900/50 border-zinc-800",
-        player.isHost && !isMe && "border-amber-500/30"
+        "relative p-6 rounded-[24px] border-2 transition-all duration-500 overflow-hidden",
+        isSpeaking ? "bg-red-500/5 border-red-500 shadow-[0_0_40px_rgba(239,68,68,0.15)] ring-4 ring-red-500/10" : "bg-zinc-900/50 border-zinc-800 hover:border-zinc-700",
+        isMe && !isSpeaking && "border-zinc-700 bg-zinc-900 shadow-inner"
       )}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      {isSpeaking && (
+        <motion.div 
+          animate={{ opacity: [0.1, 0.2, 0.1] }}
+          transition={{ repeat: Infinity, duration: 2 }}
+          className="absolute inset-0 bg-red-500/5 pointer-events-none"
+        />
+      )}
+
+      <div className="flex justify-between items-start mb-6 relative z-10">
+        <div className="flex items-center gap-4">
           <div className={cn(
-            "w-10 h-10 rounded-full flex items-center justify-center border-2",
-            player.isSpeaking ? "border-brand animate-pulse" : "border-zinc-800"
+            "w-12 h-12 rounded-[18px] flex items-center justify-center transition-all duration-500",
+            (isSpeaking && !isMuted) ? "bg-red-500 shadow-lg shadow-red-500/20 rotate-3" : isSpeaking ? "bg-zinc-800 border-2 border-red-500/50" : "bg-zinc-950 border border-zinc-800"
           )}>
-            {player.isHost ? <Skull className="w-5 h-5 text-amber-500" /> : <User className="w-5 h-5 text-zinc-500" />}
+            {player.isImposter && phase === 'RESULT' ? (
+              <Skull className="w-6 h-6 text-white" />
+            ) : (
+              isSpeaking && isMuted ? <MicOff className="w-6 h-6 text-red-500" /> : <User className={cn("w-6 h-6 transition-colors", isSpeaking ? "text-white" : "text-zinc-600")} />
+            )}
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
-              <h3 className="font-bold text-zinc-100 truncate max-w-[100px]">
+            <div className="flex items-center gap-2">
+              <h3 className="font-black text-lg text-white tracking-tight leading-none truncate max-w-[120px]">
                 {player.name}
               </h3>
-              {player.isHost && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded uppercase font-black">Host</span>}
-              {isMe && <span className="text-[8px] bg-brand/20 text-brand px-1 py-0.5 rounded uppercase font-black">You</span>}
+              {isMe && <span className="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded-full uppercase font-black tracking-widest">You</span>}
             </div>
-            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">
-              {player.isSpeaking ? "Broadcasting..." : "Online"}
-            </p>
+            <div className="flex items-center gap-2 mt-1.5">
+              <span className={cn(
+                "text-[8px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-md border",
+                (isSpeaking && isMuted) ? "bg-zinc-800 text-zinc-500 border-zinc-700" : isSpeaking ? "bg-red-500/20 text-red-500 border-red-500/20" : "bg-zinc-950 text-zinc-600 border-zinc-800"
+              )}>
+                {isSpeaking ? (isMuted ? 'Transmission Suspended' : 'Establishing Connection...') : 'Standby'}
+              </span>
+              {isSpeaking && <div className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(239,68,68,1)]", isMuted ? "bg-zinc-700 animate-pulse" : "bg-red-500 animate-pulse")} />}
+            </div>
           </div>
         </div>
-        
-        <div className="flex gap-2">
-          {canVote && !isMe && phase === 'VOTING' && (
-            <button
-              onClick={() => onVote(player.id)}
-              className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all group shrink-0"
-            >
-              <Skull className="w-4 h-4 group-hover:scale-110 transition-transform" />
-            </button>
-          )}
-          {isHostMe && !isMe && phase === 'LOBBY' && (
-            <button
-              onClick={() => onKick(player.id)}
-              className="p-2 rounded-lg bg-zinc-800 text-zinc-500 hover:bg-red-500 hover:text-white transition-all group shrink-0"
-              title="Kick Player"
-            >
-              <Users className="w-4 h-4 group-hover:scale-110 transition-transform" />
-            </button>
-          )}
+
+        <div className="flex flex-col items-end gap-2">
+          {isSpeaking && <MicVisualizer isActive={true} isMuted={isMuted} />}
+          <div className="flex gap-2">
+            {isSpeaking && isMe && (
+              <>
+                <button
+                  onClick={onMuteToggle}
+                  className={cn(
+                    "p-2.5 rounded-xl border transition-all shadow-lg active:scale-95 flex items-center gap-2",
+                    isMuted ? "bg-red-500 border-red-400 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700"
+                  )}
+                  title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
+                >
+                  {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+                <button
+                  onClick={() => {
+                    // End turn early
+                    socketRef.current?.emit('skip_turn', player.id);
+                  }}
+                  className="p-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-red-500 hover:text-white transition-all shadow-lg active:scale-95 flex items-center gap-2"
+                  title="End your speech"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </>
+            )}
+            {canVote && !isMe && phase === 'VOTING' && (
+              <button
+                onClick={() => onVote(player.id)}
+                className="p-2.5 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all shadow-lg active:scale-95"
+              >
+                <Skull className="w-4 h-4" />
+              </button>
+            )}
+            {isHostMe && !isMe && phase === 'LOBBY' && (
+              <button
+                onClick={() => onKick(player.id)}
+                className="p-2.5 rounded-xl bg-zinc-800 text-zinc-500 hover:bg-red-500 hover:text-white transition-all shadow-lg active:scale-95"
+              >
+                <Users className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      <SuspicionMeter score={player.suspicionScore} />
+      <div className="space-y-4 relative z-10">
+        <SuspicionMeter score={player.suspicionScore} />
+        
+        <div className="flex items-center justify-between pt-2">
+           <div className="flex gap-1.5">
+            {Array.from({ length: player.votesReceived }).map((_, i) => (
+              <motion.div 
+                key={i}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="w-2 h-2 bg-red-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.5)]" 
+              />
+            ))}
+          </div>
+
+          {phase === 'RESULT' && (
+             <div className="flex items-center gap-3 bg-zinc-950/50 p-2 px-3 rounded-xl border border-zinc-800">
+               <div className="text-right">
+                 <p className="text-[8px] font-black uppercase text-zinc-600 tracking-widest leading-none mb-1">INTEL REVEALED</p>
+                 <p className="text-xs font-black text-white italic tracking-widest uppercase">{player.word}</p>
+               </div>
+               {player.isImposter && <Skull className="w-4 h-4 text-red-500" />}
+             </div>
+          )}
+        </div>
+      </div>
     </motion.div>
   );
 };
@@ -664,8 +761,77 @@ export default function App() {
   const [preDifficulty, setPreDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD' | 'TOUGH'>('MEDIUM');
   const [copiedId, setCopiedId] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const lastAnnouncementRef = useRef<string>('');
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideConfig, setGuideConfig] = useState<{ tab: 'PHASES' | 'BACKEND', phase: string }>({ tab: 'PHASES', phase: 'WORD' });
+  const [announcement, setAnnouncement] = useState<{ text: string, type: 'PHASE' | 'TURN' | 'SECRET' } | null>(null);
+
+  const speak = (text: string) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.9;
+    utterance.pitch = 0.8; // More robotic
+    const voices = window.speechSynthesis.getVoices();
+    const robotVoice = voices.find(v => v.name.includes('Google UK English Male') || v.name.includes('Male'));
+    if (robotVoice) utterance.voice = robotVoice;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  useEffect(() => {
+    if (!gameState) return;
+
+    const me = gameState.players.find(p => p.id === socket?.id);
+    const announcementKey = `${gameState.phase}-${gameState.currentSpeakerIndex}-${gameState.timer >= 10}`;
+
+    // Handle voice and text announcements
+    if (gameState.phase === 'WORD' && gameState.timer === 10 && lastAnnouncementRef.current !== announcementKey) {
+      lastAnnouncementRef.current = announcementKey;
+      const wordText = me?.isImposter ? 'YOU ARE THE IMPOSTER. BLEND IN.' : `YOUR SECRET WORD IS: ${me?.word}`;
+      setAnnouncement({ text: wordText, type: 'SECRET' });
+      speak(wordText);
+      setTimeout(() => setAnnouncement(null), 4000);
+    }
+
+    if (gameState.phase === 'SPEAKING') {
+      const activePlayer = gameState.players[gameState.currentSpeakerIndex];
+      if (activePlayer && gameState.timer === gameState.settings.roundTime && lastAnnouncementRef.current !== announcementKey) {
+        lastAnnouncementRef.current = announcementKey;
+        const turnText = activePlayer.id === socket?.id ? 'IT IS YOUR TURN TO SPEAK.' : `${activePlayer.name}'S TURN.`;
+        
+        // Reset mute state when it becomes your turn
+        if (activePlayer.id === socket?.id) {
+          setIsMuted(false);
+          if (mediaStream) {
+            mediaStream.getAudioTracks().forEach(t => t.enabled = true);
+          }
+        }
+
+        setAnnouncement({ text: turnText, type: 'TURN' });
+        speak(turnText);
+        setTimeout(() => setAnnouncement(null), 3000);
+      }
+    }
+
+    if (gameState.phase === 'VOTING' && gameState.timer === 20 && lastAnnouncementRef.current !== announcementKey) {
+      lastAnnouncementRef.current = announcementKey;
+      const voteText = "VOTING INITIALIZED. IDENTIFY THE IMPOSTER.";
+      setAnnouncement({ text: voteText, type: 'PHASE' });
+      speak(voteText);
+      setTimeout(() => setAnnouncement(null), 3000);
+    }
+  }, [gameState, socket?.id, mediaStream]);
+
+  const toggleMute = () => {
+    if (mediaStream) {
+      const audioTrack = mediaStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMuted(!audioTrack.enabled);
+      }
+    }
+  };
 
   const isHost = useMemo(() => {
     return gameState?.hostId === socket?.id;
@@ -1139,6 +1305,46 @@ export default function App() {
         </div>
       </header>
 
+      {announcement && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 1.2 }}
+          className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none px-6"
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <motion.div 
+            animate={{ y: [0, -10, 0] }}
+            transition={{ repeat: Infinity, duration: 2 }}
+            className={cn(
+              "relative p-12 rounded-[32px] border-2 text-center space-y-4 shadow-2xl",
+              announcement.type === 'SECRET' ? "bg-red-500/10 border-red-500/50 shadow-red-500/20" : "bg-zinc-900/90 border-zinc-700"
+            )}
+          >
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-400">
+              {announcement.type === 'PHASE' ? 'System Broadcast' : announcement.type === 'TURN' ? 'Network Update' : 'Top Secret / Classified'}
+            </p>
+            <h2 className={cn(
+              "text-5xl font-black italic tracking-tighter uppercase",
+              announcement.type === 'SECRET' ? "text-red-500" : "text-white"
+            )}>
+              {announcement.text}
+            </h2>
+            <div className="flex justify-center gap-2">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="w-12 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                  <motion.div 
+                    animate={{ x: [-48, 48] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: i * 0.2 }}
+                    className="w-full h-full bg-brand"
+                  />
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
       <StrategyGuide 
         key={`${guideOpen}-${guideConfig.tab}-${guideConfig.phase}`}
         isOpen={guideOpen} 
@@ -1328,6 +1534,8 @@ export default function App() {
                   onKick={kickPlayer}
                   isHostMe={isHost}
                   phase={gameState.phase}
+                  isMuted={p.id === socket?.id ? isMuted : false}
+                  onMuteToggle={toggleMute}
                 />
               ))}
             </AnimatePresence>
