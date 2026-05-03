@@ -544,34 +544,6 @@ const StrategyGuide = ({ isOpen, onClose, initialTab = 'PHASES', initialPhase = 
   );
 };
 
-const SuspicionMeter = ({ score }: { score: number }) => {
-  const level = useMemo(() => {
-    if (score < 20) return { label: 'Innocent', color: 'text-green-400', bg: 'bg-green-500/20' };
-    if (score < 40) return { label: 'Normal', color: 'text-emerald-300', bg: 'bg-emerald-500/20' };
-    if (score < 60) return { label: 'Suspect', color: 'text-yellow-400', bg: 'bg-yellow-500/20' };
-    if (score < 80) return { label: 'Highly Sus', color: 'text-orange-500', bg: 'bg-orange-500/20' };
-    return { label: 'CRITICAL', color: 'text-red-500', bg: 'bg-red-500/30 font-bold animate-pulse' };
-  }, [score]);
-
-  return (
-    <div className="w-full space-y-1">
-      <div className="flex justify-between items-center text-[10px] uppercase tracking-wider font-semibold">
-        <span className={level.color}>{level.label}</span>
-        <span className="text-zinc-500">{score}%</span>
-      </div>
-      <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${score}%` }}
-          className={cn(
-            "h-full transition-colors duration-500",
-            score < 40 ? "bg-emerald-500" : score < 70 ? "bg-yellow-500" : "bg-red-500"
-          )}
-        />
-      </div>
-    </div>
-  );
-};
 
 const MicVisualizer = ({ isActive, isMuted }: { isActive: boolean, isMuted?: boolean }) => {
   const [bars, setBars] = useState([4, 8, 5, 10, 6]);
@@ -718,8 +690,6 @@ const PlayerCard = ({
       </div>
 
       <div className="space-y-4 relative z-10">
-        <SuspicionMeter score={player.suspicionScore} />
-        
         <div className="flex items-center justify-between pt-2">
            <div className="flex gap-1.5">
             {Array.from({ length: player.votesReceived }).map((_, i) => (
@@ -789,7 +759,7 @@ export default function App() {
     if (gameState.phase === 'WORD' && gameState.timer === 10 && lastAnnouncementRef.current !== announcementKey) {
       lastAnnouncementRef.current = announcementKey;
       const wordText = me?.isImposter ? 'YOU ARE THE IMPOSTER. BLEND IN.' : `YOUR SECRET WORD IS: ${me?.word}`;
-      setAnnouncement({ text: wordText, type: 'SECRET' });
+      Promise.resolve().then(() => setAnnouncement({ text: wordText, type: 'SECRET' }));
       speak(wordText);
       setTimeout(() => setAnnouncement(null), 4000);
     }
@@ -802,13 +772,15 @@ export default function App() {
         
         // Reset mute state when it becomes your turn
         if (activePlayer.id === socket?.id) {
-          setIsMuted(false);
-          if (mediaStream) {
-            mediaStream.getAudioTracks().forEach(t => t.enabled = true);
-          }
+          Promise.resolve().then(() => {
+            setIsMuted(false);
+            if (mediaStream) {
+              mediaStream.getAudioTracks().forEach(t => t.enabled = true);
+            }
+          });
         }
 
-        setAnnouncement({ text: turnText, type: 'TURN' });
+        Promise.resolve().then(() => setAnnouncement({ text: turnText, type: 'TURN' }));
         speak(turnText);
         setTimeout(() => setAnnouncement(null), 3000);
       }
@@ -817,7 +789,7 @@ export default function App() {
     if (gameState.phase === 'VOTING' && gameState.timer === 20 && lastAnnouncementRef.current !== announcementKey) {
       lastAnnouncementRef.current = announcementKey;
       const voteText = "VOTING INITIALIZED. IDENTIFY THE IMPOSTER.";
-      setAnnouncement({ text: voteText, type: 'PHASE' });
+      Promise.resolve().then(() => setAnnouncement({ text: voteText, type: 'PHASE' }));
       speak(voteText);
       setTimeout(() => setAnnouncement(null), 3000);
     }
@@ -854,12 +826,12 @@ export default function App() {
   useEffect(() => {
     const s = io();
     socketRef.current = s;
-    setSocket(s);
+    Promise.resolve().then(() => setSocket(s));
 
     const urlParams = new URLSearchParams(window.location.search);
     const roomFromUrl = urlParams.get('room');
     if (roomFromUrl) {
-      setRoomId(roomFromUrl.toUpperCase());
+      Promise.resolve().then(() => setRoomId(roomFromUrl.toUpperCase()));
     }
 
     s.on('state_update', (newState: GameState) => {
