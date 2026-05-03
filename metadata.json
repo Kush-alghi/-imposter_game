@@ -1,0 +1,9 @@
+{
+  "name": "Imposter  Game",
+  "description": "A real-time voice-based multiplayer game where players find the imposter.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": []
+}
