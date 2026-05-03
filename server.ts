@@ -56,6 +56,37 @@ interface GameState {
 
 const rooms = new Map<string, GameState>();
 
+function serializeState(state: GameState, socketId?: string) {
+  const players = Array.from(state.players.values()).map(p => {
+    // If not Result phase and not the player themselves, hide secret info
+    if (state.phase !== 'RESULT' && p.id !== socketId) {
+      return {
+        ...p,
+        word: '********',
+        isImposter: false // Mask as innocent
+      };
+    }
+    return p;
+  });
+
+  return {
+    ...state,
+    players,
+    pendingPlayers: Array.from(state.pendingPlayers.values())
+  };
+}
+
+// Helper to broadcast state to each member with their own view
+function broadcastState(state: GameState) {
+  state.players.forEach((player) => {
+    io.to(player.id).emit('state_update', serializeState(state, player.id));
+  });
+  // Also update pending players (they see the lobby)
+  state.pendingPlayers.forEach((player) => {
+    io.to(player.id).emit('state_update', serializeState(state, player.id));
+  });
+}
+
 function addLog(state: GameState, type: ActivityLog['type'], message: string) {
   state.activityLog.push({
     id: Math.random().toString(36).substring(7),
@@ -80,7 +111,7 @@ function generateRoomId() {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('create_room', ({ playerName }) => {
+  socket.on('create_room', ({ playerName, difficulty }) => {
     const roomId = generateRoomId();
     const state: GameState = {
       id: roomId,
@@ -95,7 +126,7 @@ io.on('connection', (socket) => {
       settings: {
         maxPlayers: 10,
         roundTime: 30,
-        difficulty: 'MEDIUM'
+        difficulty: difficulty || 'MEDIUM'
       }
     };
 
@@ -116,7 +147,7 @@ io.on('connection', (socket) => {
     rooms.set(roomId, state);
     socket.join(roomId);
     socket.emit('room_created', { roomId });
-    io.to(roomId).emit('state_update', serializeState(state));
+    broadcastState(state);
     console.log(`Room created: ${roomId} by ${playerName}`);
   });
 
@@ -134,7 +165,7 @@ io.on('connection', (socket) => {
 
     state.pendingPlayers.set(socket.id, { id: socket.id, name: playerName });
     socket.emit('waiting_for_host');
-    io.to(state.hostId).emit('state_update', serializeState(state));
+    broadcastState(state);
     console.log(`Join request from ${playerName} for room ${roomId}`);
   });
 
@@ -171,7 +202,7 @@ io.on('connection', (socket) => {
       }
     }
 
-    io.to(roomId).emit('state_update', serializeState(state));
+    broadcastState(state);
   });
 
   socket.on('kick_player', ({ roomId, targetId }) => {
@@ -187,7 +218,7 @@ io.on('connection', (socket) => {
         targetSocket.leave(roomId);
         targetSocket.emit('error', 'You have been removed from the session.');
       }
-      io.to(roomId).emit('state_update', serializeState(state));
+      broadcastState(state);
       console.log(`Player ${targetId} kicked from room ${roomId}`);
     }
   });
@@ -197,7 +228,7 @@ io.on('connection', (socket) => {
     if (!state || state.hostId !== socket.id) return;
     state.settings = { ...state.settings, ...settings };
     addLog(state, 'HOST_TRANSFER', `Settings updated: Difficulty set to ${state.settings.difficulty}`);
-    io.to(roomId).emit('state_update', serializeState(state));
+    broadcastState(state);
   });
 
   socket.on('start_game', (roomId) => {
@@ -228,26 +259,85 @@ io.on('connection', (socket) => {
     state.phase = 'WORD';
     state.timer = 10; // 10 seconds to look at the word
     
-    io.to(roomId).emit('state_update', serializeState(state));
+    broadcastState(state);
     
     // Start countdown for WORD phase
     const interval = setInterval(() => {
       const currentState = rooms.get(roomId);
-      if (!currentState || currentState.phase !== 'WORD') {
+      if (!currentState) {
         clearInterval(interval);
         return;
       }
 
-      currentState.timer -= 1;
-      if (currentState.timer <= 0) {
-        currentState.phase = 'SPEAKING';
-        currentState.currentSpeakerIndex = 0;
-        currentState.timer = currentState.settings.roundTime;
+      if (currentState.phase === 'WORD') {
+        currentState.timer -= 1;
+        if (currentState.timer <= 0) {
+          currentState.phase = 'SPEAKING';
+          currentState.currentSpeakerIndex = 0;
+          currentState.timer = currentState.settings.roundTime;
+        }
+      } else if (currentState.phase === 'SPEAKING') {
+        currentState.timer -= 1;
+        // Simulate suspicion score drift during speaking
+        const players = Array.from(currentState.players.values());
+        const currentSpeaker = players[currentState.currentSpeakerIndex];
+        if (currentSpeaker) {
+          currentSpeaker.suspicionScore = Math.min(100, currentSpeaker.suspicionScore + Math.random() * 2);
+        }
+
+        if (currentState.timer <= 0) {
+          currentState.currentSpeakerIndex += 1;
+          if (currentState.currentSpeakerIndex >= currentState.players.size) {
+            currentState.phase = 'VOTING';
+            currentState.timer = 20; // 20 seconds to vote
+          } else {
+            currentState.timer = currentState.settings.roundTime;
+          }
+        }
+      } else if (currentState.phase === 'VOTING') {
+        currentState.timer -= 1;
+        if (currentState.timer <= 0) {
+          currentState.phase = 'RESULT';
+          resolveVotes(currentState);
+          clearInterval(interval);
+        }
+      } else {
         clearInterval(interval);
+        return;
       }
-      io.to(roomId).emit('state_update', serializeState(currentState));
+
+      broadcastState(currentState);
     }, 1000);
   });
+
+  function resolveVotes(state: GameState) {
+    const players = Array.from(state.players.values());
+    let maxVotes = -1;
+    let suspectedPlayerId = '';
+    
+    for (const p of players) {
+      if (p.votesReceived > maxVotes) {
+        maxVotes = p.votesReceived;
+        suspectedPlayerId = p.id;
+      } else if (p.votesReceived === maxVotes) {
+        suspectedPlayerId = ''; // Tie
+      }
+    }
+
+    const suspectedPlayer = state.players.get(suspectedPlayerId);
+    const imposter = players.find(p => p.isImposter);
+    
+    if (suspectedIdIsImposter(state, suspectedPlayerId)) {
+      addLog(state, 'START', `Imposter ${suspectedPlayer?.name} was caught! Agents win.`);
+    } else {
+      addLog(state, 'START', `Mission failed. ${imposter?.name} was the Imposter.`);
+    }
+  }
+
+  function suspectedIdIsImposter(state: GameState, id: string): boolean {
+    const p = state.players.get(id);
+    return p ? p.isImposter : false;
+  }
 
   socket.on('vote', ({ roomId, targetId }) => {
     const state = rooms.get(roomId);
@@ -259,7 +349,7 @@ io.on('connection', (socket) => {
       const totalPlayers = state.players.size;
       target.suspicionScore = Math.min(100, Math.floor((target.votesReceived / totalPlayers) * 100));
 
-      io.to(roomId).emit('state_update', serializeState(state));
+      broadcastState(state);
       io.to(roomId).emit('suspicion_update', { playerId: targetId, score: target.suspicionScore });
     }
   });
@@ -268,7 +358,7 @@ io.on('connection', (socket) => {
     for (const [roomId, state] of rooms.entries()) {
       if (state.pendingPlayers.has(socket.id)) {
         state.pendingPlayers.delete(socket.id);
-        io.to(state.hostId).emit('state_update', serializeState(state));
+        broadcastState(state);
       }
 
       if (state.players.has(socket.id)) {
@@ -295,20 +385,12 @@ io.on('connection', (socket) => {
               console.log(`Host transferred to ${nextHostId} in room ${roomId}`);
             }
           }
-          io.to(roomId).emit('state_update', serializeState(state));
+          broadcastState(state);
         }
       }
     }
   });
 });
-
-function serializeState(state: GameState) {
-  return {
-    ...state,
-    players: Array.from(state.players.values()),
-    pendingPlayers: Array.from(state.pendingPlayers.values())
-  };
-}
 
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

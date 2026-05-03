@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Mic, Users, Target, AlertCircle, 
   ChevronRight, Play, Loader2, BarChart2,
   Activity, Check, Copy, ExternalLink,
-  Skull, User
+  Skull, User, Shield, Zap, Database,
+  Cpu, Layers, Settings, X, Info
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -123,6 +124,427 @@ const PendingRequest = ({ request, onApprove }: { request: { id: string, name: s
   );
 };
 
+const StrategyGuide = ({ isOpen, onClose, initialTab = 'PHASES', initialPhase = 'WORD' }: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  initialTab?: 'PHASES' | 'BACKEND'
+  initialPhase?: string
+}) => {
+  const [activeTab, setActiveTab] = useState<'PHASES' | 'BACKEND'>(initialTab);
+  const [activePhase, setActivePhase] = useState(initialPhase);
+
+  const phases = ['WORD', 'SPEAKING', 'VOTING', 'RESULT'];
+  const backendPhases = ['LOBBY', 'WORD', 'SPEAKING', 'VOTING', 'RESULT'];
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+          />
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+            className="relative w-full max-w-4xl h-[80vh] bg-[#0c0c0e] border border-zinc-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+          >
+            {/* Header */}
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
+              <div className="flex gap-4">
+                {(['PHASES', 'BACKEND'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => {
+                        setActiveTab(t);
+                        setActivePhase(t === 'PHASES' ? 'WORD' : 'LOBBY');
+                    }}
+                    className={cn(
+                      "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                      activeTab === t 
+                        ? "bg-red-500/10 text-red-500 border border-red-500/20" 
+                        : "text-zinc-600 hover:text-zinc-400"
+                    )}
+                  >
+                    {t === 'PHASES' ? 'Game Phases' : 'Backend Strategy'}
+                  </button>
+                ))}
+              </div>
+              <button 
+                onClick={onClose}
+                className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-white transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="px-6 py-4 bg-zinc-900/30 flex gap-2 shrink-0 overflow-x-auto scrollbar-hide">
+              {(activeTab === 'PHASES' ? phases : backendPhases).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setActivePhase(p)}
+                  className={cn(
+                    "px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shrink-0 border",
+                    activePhase === p 
+                      ? "bg-zinc-800 text-white border-zinc-700 shadow-lg" 
+                      : "text-zinc-600 border-transparent hover:text-zinc-400"
+                  )}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            {/* Content Container */}
+            <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+              {activeTab === 'PHASES' ? (
+                <div className="space-y-8">
+                  {activePhase === 'WORD' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <div className="flex items-center justify-between">
+                         <div>
+                            <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Word assignment</h2>
+                            <p className="text-zinc-500 mt-1">Each player privately receives their secret keyword the moment the host presses Start Phase.</p>
+                         </div>
+                         <div className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-full text-[10px] font-black uppercase tracking-widest">
+                            10S
+                         </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Your Word</p>
+                          <p className="text-2xl font-black text-red-500 tracking-widest">VOLCANO</p>
+                        </div>
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800 opacity-50">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Imposter Word</p>
+                          <p className="text-2xl font-black text-zinc-400 tracking-widest uppercase">Unknown</p>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">What Happens</p>
+                        <div className="space-y-3">
+                          {[
+                            "Server picks a word pair based on difficulty. All real players get the same word.",
+                            "The Imposter(s) receive UNKNOWN — they must bluff without knowing the word.",
+                            "A 10-second countdown runs while players memorise. Then phase auto-advances to Speaking."
+                          ].map((step, i) => (
+                            <div key={i} className="flex gap-4 p-4 bg-zinc-900/20 rounded-xl border border-zinc-800/50">
+                              <div className="w-6 h-6 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 font-bold text-xs shrink-0">{i+1}</div>
+                              <p className="text-sm text-zinc-400 font-medium">{step}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                  {activePhase === 'SPEAKING' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <div className="flex items-center justify-between">
+                         <div>
+                            <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Speaking round</h2>
+                            <p className="text-zinc-500 mt-1">Players take turns speaking about the secret word — without saying it directly. The imposter must blend in.</p>
+                         </div>
+                         <div className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-full text-[10px] font-black uppercase tracking-widest">
+                            30S EACH
+                         </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Current Speaker</p>
+                          <p className="text-lg font-black text-red-500 uppercase tracking-tight">GhostProtocol</p>
+                        </div>
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Speaker Index</p>
+                          <p className="text-lg font-black text-zinc-400 font-mono">currentSpeakerIndex</p>
+                        </div>
+                      </div>
+                       <div className="space-y-4">
+                        <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Mechanics</p>
+                        <div className="space-y-3">
+                          {[
+                            "The server steps through players[] in order using currentSpeakerIndex. The active player's card shows 'Broadcasting...' and a pulsing border.",
+                            "Each speaker gets 30 seconds. The timer bar on the sidebar counts down live via state_update.",
+                            "While listening, players can watch suspicion scores update in real time on each player card.",
+                            "After all players speak, the server transitions to Voting automatically."
+                          ].map((step, i) => (
+                            <div key={i} className="flex gap-4 p-4 bg-zinc-900/20 rounded-xl border border-zinc-800/50">
+                              <div className="w-6 h-6 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 font-bold text-xs shrink-0">{i+1}</div>
+                              <p className="text-sm text-zinc-400 font-medium">{step}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                   {activePhase === 'VOTING' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <div>
+                        <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Voting</h2>
+                        <p className="text-zinc-500 mt-1">Everyone simultaneously votes for who they think the imposter is. One vote per player — no self-votes.</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Vote Action</p>
+                          <p className="text-xs font-mono text-red-500">socket.emit('vote', ...)</p>
+                        </div>
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Tracked On</p>
+                          <p className="text-xs font-mono text-zinc-400">votesReceived</p>
+                        </div>
+                      </div>
+                       <div className="space-y-4">
+                        <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Mechanics</p>
+                        <div className="space-y-3">
+                          {[
+                            "The skull button appears on every PlayerCard that isn't yours.",
+                            "Clicking it emits vote: { roomId, targetId }. The server tallies votes on each player's votesReceived field.",
+                            "Suspicion scores continue updating as votes come in, giving a live read of who's being targeted.",
+                            "Once all votes are cast (or timer expires), the server resolves the round and emits the RESULT phase."
+                          ].map((step, i) => (
+                            <div key={i} className="flex gap-4 p-4 bg-zinc-900/20 rounded-xl border border-zinc-800/50">
+                              <div className="w-6 h-6 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 font-bold text-xs shrink-0">{i+1}</div>
+                              <p className="text-sm text-zinc-400 font-medium">{step}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                  {activePhase === 'RESULT' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <div>
+                        <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Result</h2>
+                        <p className="text-zinc-500 mt-1">The server reveals who the imposter was, whether the vote was correct, and final suspicion scores for all players.</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Revealed Fields</p>
+                          <p className="text-sm font-mono text-red-500">isImposter, word</p>
+                        </div>
+                        <div className="p-6 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest mb-2">Final State</p>
+                          <p className="text-sm font-mono text-zinc-400">RESULT phase</p>
+                        </div>
+                      </div>
+                       <div className="space-y-4">
+                        <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">What Players See</p>
+                        <div className="space-y-3">
+                          {[
+                            "Each player's isImposter flag and actual word are revealed in the state broadcast.",
+                            "Final votesReceived counts show who the group suspected most.",
+                            "The host can start a new round (back to LOBBY) or the room dissolves."
+                          ].map((step, i) => (
+                            <div key={i} className="flex gap-4 p-4 bg-zinc-900/20 rounded-xl border border-zinc-800/50">
+                              <div className="w-6 h-6 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 font-bold text-xs shrink-0">{i+1}</div>
+                              <p className="text-sm text-zinc-400 font-medium">{step}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                    <h2 className="text-lg font-black text-white uppercase tracking-widest flex items-center gap-2">
+                        {activePhase} — Socket Events
+                    </h2>
+                    <div className="space-y-3">
+                        {activePhase === 'LOBBY' && [
+                            { role: 'CLIENT', event: 'create_room', data: '{ playerName }', desc: 'Server generates a 6-char room ID, creates GameState, adds host player, emits room_created back.' },
+                            { role: 'SERVER', event: 'room_created', data: '{ roomId }', desc: 'Host receives this, sets joined=true, requests mic permissions.' },
+                            { role: 'CLIENT', event: 'join_request', data: '{ roomId, playerName }', desc: 'Server adds player to pendingPlayers[], notifies host, emits waiting_for_host to requester.' },
+                            { role: 'CLIENT', event: 'approve_player', data: '{ roomId, targetId, approved }', desc: 'Host only. If approved, moves player from pending to players[]. Broadcasts state_update.' },
+                            { role: 'CLIENT', event: 'update_settings', data: '{ roomId, settings: { difficulty } }', desc: 'Host only. Updates GameState.settings, broadcasts state_update to room.' },
+                            { role: 'CLIENT', event: 'kick_player', data: '{ roomId, targetId }', desc: 'Host only. Removes player, logs KICK to activityLog, broadcasts state_update.' },
+                            { role: 'BROADCAST', event: 'state_update', data: 'GameState', desc: 'Sent to all room members on any state change. Client calls setGameState().' },
+                        ].map((item, i) => (
+                            <motion.div 
+                                key={i} 
+                                initial={{ opacity: 0, x: -10 }} 
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.05 }}
+                                className="p-4 bg-zinc-900/30 border border-zinc-800 rounded-xl space-y-1"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className={cn(
+                                        "text-[8px] font-black px-1.5 py-0.5 rounded tracking-widest",
+                                        item.role === 'CLIENT' ? "bg-blue-500/20 text-blue-400" :
+                                        item.role === 'SERVER' ? "bg-green-500/20 text-green-400" :
+                                        "bg-amber-500/20 text-amber-500"
+                                    )}>
+                                        {item.role}
+                                    </span>
+                                    <span className="font-mono text-xs font-bold text-zinc-100">{item.event}</span>
+                                    <span className="font-mono text-[10px] text-zinc-500 tracking-tight">{item.data}</span>
+                                </div>
+                                <p className="text-xs text-zinc-400 pl-[56px]">{item.desc}</p>
+                            </motion.div>
+                        ))}
+                        {activePhase === 'WORD' && [
+                            { role: 'CLIENT', event: 'start_game', data: 'roomId', desc: 'Host only. Triggers word assignment and phase transition.' },
+                            { role: 'SERVER', event: 'Word selection logic', data: '', desc: 'Server picks a word pair based on difficulty. One imposter is randomly selected. Real players get player.word = "VOLCANO", imposter gets player.word = "UNKNOWN" and player.isImposter = true.' },
+                            { role: 'SERVER', event: 'Timer: 10s countdown', data: '', desc: "Server sets phase = 'WORD', timer = 10. Decrements each second, broadcasting state_update. At 0, auto-transitions to SPEAKING." },
+                            { role: 'BROADCAST', event: 'state_update', data: "phase: 'WORD', timer: 10→0", desc: 'Client reads me.word and me.isImposter from state. Sidebar shows countdown via timer field.' },
+                        ].map((item, i) => (
+                            <motion.div 
+                                key={i} 
+                                initial={{ opacity: 0, x: -10 }} 
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.05 }}
+                                className="p-4 bg-zinc-900/30 border border-zinc-800 rounded-xl space-y-1"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className={cn(
+                                        "text-[8px] font-black px-1.5 py-0.5 rounded tracking-widest",
+                                        item.role === 'CLIENT' ? "bg-blue-500/20 text-blue-400" :
+                                        item.role === 'SERVER' ? "bg-green-500/20 text-green-400" :
+                                        "bg-amber-500/20 text-amber-500"
+                                    )}>
+                                        {item.role}
+                                    </span>
+                                    <span className="font-mono text-xs font-bold text-zinc-100">{item.event}</span>
+                                    {item.data && <span className="font-mono text-[10px] text-zinc-500 tracking-tight">{item.data}</span>}
+                                </div>
+                                <p className="text-xs text-zinc-400 pl-[56px]">{item.desc}</p>
+                            </motion.div>
+                        ))}
+                         {activePhase === 'SPEAKING' && [
+                            { role: 'SERVER', event: 'Speaker rotation', data: '', desc: 'Sets currentSpeakerIndex = 0, marks players[0].isSpeaking = true. Starts 30s timer.' },
+                            { role: 'BROADCAST', event: 'state_update', data: "phase: 'SPEAKING', currentSpeakerIndex, timer", desc: 'Client uses players[currentSpeakerIndex].isSpeaking to show pulsing border + "Broadcasting..." label.' },
+                            { role: 'SERVER', event: 'suspicionScore update', data: '', desc: 'As speech/activity occurs, server increments suspicionScore per player. Triggers state_update so SuspicionMeter animates live.' },
+                            { role: 'SERVER', event: 'Next speaker advance', data: '', desc: 'When timer hits 0, currentSpeakerIndex++. Repeats until all players have spoken, then transitions to VOTING.' },
+                        ].map((item, i) => (
+                            <motion.div 
+                                key={i} 
+                                initial={{ opacity: 0, x: -10 }} 
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.05 }}
+                                className="p-4 bg-zinc-900/30 border border-zinc-800 rounded-xl space-y-1"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className={cn(
+                                        "text-[8px] font-black px-1.5 py-0.5 rounded tracking-widest",
+                                        item.role === 'CLIENT' ? "bg-blue-500/20 text-blue-400" :
+                                        item.role === 'SERVER' ? "bg-green-500/20 text-green-400" :
+                                        "bg-amber-500/20 text-amber-500"
+                                    )}>
+                                        {item.role}
+                                    </span>
+                                    <span className="font-mono text-xs font-bold text-zinc-100">{item.event}</span>
+                                    {item.data && <span className="font-mono text-[10px] text-zinc-500 tracking-tight">{item.data}</span>}
+                                </div>
+                                <p className="text-xs text-zinc-400 pl-[56px]">{item.desc}</p>
+                            </motion.div>
+                        ))}
+                        {activePhase === 'VOTING' && [
+                            { role: 'BROADCAST', event: 'state_update', data: "phase: 'VOTING'", desc: "Client shows skull vote buttons on all PlayerCards except the player's own card." },
+                            { role: 'CLIENT', event: 'vote', data: '{ roomId, targetId }', desc: "Server increments target's votesReceived. Updates suspicionScore. Broadcasts state_update." },
+                            { role: 'SERVER', event: 'Vote resolution', data: '', desc: 'When all votes tallied (or timeout), server finds player with max votesReceived, checks if they are the imposter, determines win/loss, transitions to RESULT.' },
+                        ].map((item, i) => (
+                            <motion.div 
+                                key={i} 
+                                initial={{ opacity: 0, x: -10 }} 
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.05 }}
+                                className="p-4 bg-zinc-900/30 border border-zinc-800 rounded-xl space-y-1"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className={cn(
+                                        "text-[8px] font-black px-1.5 py-0.5 rounded tracking-widest",
+                                        item.role === 'CLIENT' ? "bg-blue-500/20 text-blue-400" :
+                                        item.role === 'SERVER' ? "bg-green-500/20 text-green-400" :
+                                        "bg-amber-500/20 text-amber-500"
+                                    )}>
+                                        {item.role}
+                                    </span>
+                                    <span className="font-mono text-xs font-bold text-zinc-100">{item.event}</span>
+                                    {item.data && <span className="font-mono text-[10px] text-zinc-500 tracking-tight">{item.data}</span>}
+                                </div>
+                                <p className="text-xs text-zinc-400 pl-[56px]">{item.desc}</p>
+                            </motion.div>
+                        ))}
+                        {activePhase === 'RESULT' && [
+                            { role: 'BROADCAST', event: 'state_update', data: "phase: 'RESULT', players[].isImposter, players[].word", desc: "All players now see each other's words and who the imposter was. isImposter and word fields are fully revealed." },
+                            { role: 'SERVER', event: 'Activity log entry', data: '', desc: "Server appends a result entry to activityLog[] with type 'RESULT'. Visible in ActivityLog sidebar component." },
+                            { role: 'CLIENT', event: 'start_game (new round)', data: 'roomId', desc: 'Host can restart. Server resets phase to LOBBY, clears words, votes, and suspicion scores. Keeps players in room.' },
+                        ].map((item, i) => (
+                            <motion.div 
+                                key={i} 
+                                initial={{ opacity: 0, x: -10 }} 
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.05 }}
+                                className="p-4 bg-zinc-900/30 border border-zinc-800 rounded-xl space-y-1"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className={cn(
+                                        "text-[8px] font-black px-1.5 py-0.5 rounded tracking-widest",
+                                        item.role === 'CLIENT' ? "bg-blue-500/20 text-blue-400" :
+                                        item.role === 'SERVER' ? "bg-green-500/20 text-green-400" :
+                                        "bg-amber-500/20 text-amber-500"
+                                    )}>
+                                        {item.role}
+                                    </span>
+                                    <span className="font-mono text-xs font-bold text-zinc-100">{item.event}</span>
+                                    {item.data && <span className="font-mono text-[10px] text-zinc-500 tracking-tight">{item.data}</span>}
+                                </div>
+                                <p className="text-xs text-zinc-400 pl-[56px]">{item.desc}</p>
+                            </motion.div>
+                        ))}
+                    </div>
+
+                    <div className="flex gap-4 pt-4 border-t border-zinc-800/50">
+                        <button className="flex-1 py-3 px-6 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center justify-center gap-2">
+                           suspicionScore logic <ExternalLink className="w-3 h-3" />
+                        </button>
+                        <button className="flex-1 py-3 px-6 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all flex items-center justify-center gap-2">
+                           Server architecture <ExternalLink className="w-3 h-3" />
+                        </button>
+                    </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-zinc-800 bg-zinc-900/20 shrink-0 flex items-center justify-between">
+              <button 
+                onClick={() => {
+                   const currPhases = activeTab === 'PHASES' ? phases : backendPhases;
+                   const idx = currPhases.indexOf(activePhase);
+                   if (idx > 0) setActivePhase(currPhases[idx-1]);
+                }}
+                className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all"
+              >
+                <ChevronRight className="w-4 h-4 rotate-180" /> Prev phase
+              </button>
+              <div className="flex gap-1.5">
+                  {(activeTab === 'PHASES' ? phases : backendPhases).map(p => (
+                      <div key={p} className={cn("w-1.5 h-1.5 rounded-full", activePhase === p ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" : "bg-zinc-800")} />
+                  ))}
+              </div>
+              <button 
+                 onClick={() => {
+                    const currPhases = activeTab === 'PHASES' ? phases : backendPhases;
+                    const idx = currPhases.indexOf(activePhase);
+                    if (idx < currPhases.length - 1) setActivePhase(currPhases[idx+1]);
+                 }}
+                className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-all"
+              >
+                Next phase <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 const SuspicionMeter = ({ score }: { score: number }) => {
   const level = useMemo(() => {
     if (score < 20) return { label: 'Innocent', color: 'text-green-400', bg: 'bg-green-500/20' };
@@ -229,6 +651,7 @@ const PlayerCard = ({
 };
 
 export default function App() {
+  const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [roomId, setRoomId] = useState('');
   const [name, setName] = useState('');
@@ -240,6 +663,8 @@ export default function App() {
   const [flow, setFlow] = useState<'HOST' | 'JOIN'>('HOST');
   const [preDifficulty, setPreDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD' | 'TOUGH'>('MEDIUM');
   const [copiedId, setCopiedId] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideConfig, setGuideConfig] = useState<{ tab: 'PHASES' | 'BACKEND', phase: string }>({ tab: 'PHASES', phase: 'WORD' });
 
   const isHost = useMemo(() => {
     return gameState?.hostId === socket?.id;
@@ -249,8 +674,19 @@ export default function App() {
     return gameState?.players.find(p => p.id === socket?.id);
   }, [gameState, socket]);
 
+  const requestPermissions = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      setMediaStream(stream);
+    } catch (err) {
+      console.error("Permission denied", err);
+      setError("Microphone access is required to play.");
+    }
+  };
+
   useEffect(() => {
     const s = io();
+    socketRef.current = s;
     setSocket(s);
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -292,16 +728,6 @@ export default function App() {
     };
   }, []);
 
-  const requestPermissions = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      setMediaStream(stream);
-    } catch (err) {
-      console.error("Permission denied", err);
-      setError("Microphone access is required to play.");
-    }
-  };
-
   const createRoom = () => {
     if (!name || !socket) return;
     setError('');
@@ -317,7 +743,7 @@ export default function App() {
     if (joined && gameState && gameState.hostId === socket?.id && gameState.settings.difficulty !== preDifficulty) {
       socket.emit('update_settings', { roomId: gameState.id, settings: { difficulty: preDifficulty } });
     }
-  }, [joined, gameState?.id]);
+  }, [joined, gameState, socket, preDifficulty]);
 
   const joinRoom = () => {
     if (!name || !roomId || !socket) return;
@@ -549,7 +975,9 @@ export default function App() {
                           try {
                             const text = await navigator.clipboard.readText();
                             if (text.length <= 6) setRoomId(text.toUpperCase());
-                          } catch (e) {}
+                          } catch (e) {
+                            // User might not have granted clipboard permission or browser doesn't support it
+                          }
                         }}
                         className="absolute right-5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-red-500 transition-colors"
                         title="Paste ID"
@@ -598,10 +1026,24 @@ export default function App() {
                     <p className="text-xs text-zinc-600 uppercase font-black tracking-widest italic">Sync status: Waiting for array deployment</p>
                   </div>
                    <div className="flex flex-wrap gap-3">
-                      <button className="flex-1 px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-all flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                            setGuideConfig({ tab: 'LOBBY', phase: 'LOBBY' } as any); // Type cast for brevity
+                            setGuideOpen(true);
+                            // We'll adjust the component to handle 'LOBBY' correctly if needed, or just set to 'PHASES'
+                            setGuideConfig({ tab: 'BACKEND', phase: 'LOBBY' });
+                        }}
+                        className="flex-1 px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-all flex items-center gap-2"
+                      >
                         Host controls <ExternalLink className="w-3 h-3" />
                       </button>
-                      <button className="flex-1 px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-all flex items-center gap-2 justify-end">
+                      <button 
+                        onClick={() => {
+                            setGuideConfig({ tab: 'PHASES', phase: 'WORD' });
+                            setGuideOpen(true);
+                        }}
+                        className="flex-1 px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-all flex items-center gap-2 justify-end"
+                      >
                         Next: Gameplay <ExternalLink className="w-3 h-3" />
                       </button>
                    </div>
@@ -683,8 +1125,26 @@ export default function App() {
             <Loader2 className={cn("w-4 h-4 text-brand", gameState?.phase !== 'LOBBY' && "animate-spin")} />
             <span className="font-bold text-sm text-brand uppercase tracking-tighter">{gameState?.phase || 'LOBBY'}</span>
           </div>
+          <button 
+            onClick={() => {
+                setGuideConfig({ tab: 'PHASES', phase: gameState?.phase || 'WORD' });
+                setGuideOpen(true);
+            }}
+            className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 px-4 py-2 rounded-lg border border-zinc-800 transition-colors"
+          >
+            <Info className="w-4 h-4 text-zinc-500" />
+            <span className="font-bold text-sm text-zinc-300 uppercase tracking-tighter">Protocol Guide</span>
+          </button>
         </div>
       </header>
+
+      <StrategyGuide 
+        key={`${guideOpen}-${guideConfig.tab}-${guideConfig.phase}`}
+        isOpen={guideOpen} 
+        onClose={() => setGuideOpen(false)} 
+        initialTab={guideConfig.tab}
+        initialPhase={guideConfig.phase}
+      />
 
       <main className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-4 gap-8">
         <div className="lg:col-span-1 space-y-6">
