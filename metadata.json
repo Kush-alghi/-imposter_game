@@ -1,6 +1,6 @@
 {
-  "name": "Imposter  Game",
-  "description": "A real-time voice-based multiplayer game where players find the imposter.",
+  "name": "Vocal Imposter",
+  "description": "Multiplayer voice-based social deduction game. Find the imposter using your voice.",
   "requestFramePermissions": [
     "camera",
     "microphone"
