@@ -24,6 +24,13 @@ interface Player {
   word: string; isImposter: boolean; hasVoted: boolean;
 }
 
+interface Message {
+  playerId: string;
+  playerName: string;
+  emoji: string;
+  timestamp: number;
+}
+
 type Phase = 'LOBBY' | 'WORD' | 'SPEAKING' | 'VOTING' | 'RESULT';
 
 interface GameState {
@@ -31,38 +38,13 @@ interface GameState {
   players: Player[];
   pendingPlayers: { id: string; name: string }[];
   phase: Phase; secretWord: string;
-  currentSpeakerIndex: number; timer: number;
+  currentSpeakerIndex: number;
+  currentRound: number;
+  timer: number;
   activityLog: { id: string; type: string; message: string; timestamp: number }[];
+  messages: Message[];
   settings: { maxPlayers: number; roundTime: number; difficulty: 'EASY'|'MEDIUM'|'HARD'|'TOUGH' };
 }
-
-// ─── Suspicion Meter ──────────────────────────────────────
-
-const SuspicionMeter = ({ score }: { score: number }) => {
-  const level = useMemo(() => {
-    if (score < 20) return { label: 'Clear',      color: 'text-emerald-400', bar: 'bg-emerald-500' };
-    if (score < 40) return { label: 'Low',        color: 'text-green-400',   bar: 'bg-green-500'   };
-    if (score < 60) return { label: 'Suspicious', color: 'text-yellow-400',  bar: 'bg-yellow-500'  };
-    if (score < 80) return { label: 'High',       color: 'text-orange-400',  bar: 'bg-orange-500'  };
-    return              { label: 'CRITICAL',   color: 'text-red-500',     bar: 'bg-red-500'     };
-  }, [score]);
-
-  return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest">
-        <span className={level.color}>{level.label}</span>
-        <span className="text-zinc-500">{Math.round(score)}%</span>
-      </div>
-      <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-        <motion.div
-          animate={{ width: `${score}%` }}
-          transition={{ duration: 0.6 }}
-          className={cn('h-full rounded-full', level.bar, score >= 80 && 'animate-pulse')}
-        />
-      </div>
-    </div>
-  );
-};
 
 // ─── Mic Visualizer ───────────────────────────────────────
 
@@ -70,9 +52,9 @@ const MicVisualizer = ({ active, muted }: { active: boolean; muted: boolean }) =
   const [bars, setBars] = useState([3, 6, 4, 8, 5]);
   useEffect(() => {
     if (!active || muted) return;
-    const t = setInterval(() => setBars(bars.map(() => Math.floor(Math.random() * 10) + 2)), 120);
+    const t = setInterval(() => setBars(prev => prev.map(() => Math.floor(Math.random() * 10) + 2)), 120);
     return () => clearInterval(t);
-  }, [active, muted, bars]);
+  }, [active, muted]);
   return (
     <div className="flex items-end gap-0.5 h-5">
       {bars.map((h, i) => (
@@ -157,6 +139,64 @@ const PendingRequest = ({
 );
 
 // ─── Announcement Overlay ─────────────────────────────────
+
+const EmojiChat = ({ messages, currentUserId, onSend }: { messages: Message[], currentUserId: string, onSend: (emoji: string) => void }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const emojis = ['🕵️', '🤫', '👀', '🤐', '👺', '🔪', '🚨', '🤔', '🧐', '🗣️', '🔇', '🤝', '🔥', '💧', '✅', '❌'];
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  return (
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl flex flex-col h-[400px] overflow-hidden">
+      <div className="p-3 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between">
+        <p className="text-[10px] font-black uppercase text-zinc-500 tracking-widest flex items-center gap-2">
+          <Activity className="w-3 h-3" /> Secure Comms (Emoji Only)
+        </p>
+      </div>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide">
+        {messages.map((m, i) => (
+          <motion.div
+            key={`${m.timestamp}-${i}`}
+            initial={{ opacity: 0, x: m.playerId === currentUserId ? 10 : -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className={cn(
+              "flex flex-col gap-1",
+              m.playerId === currentUserId ? "items-end" : "items-start"
+            )}
+          >
+            <span className="text-[9px] text-zinc-600 font-bold uppercase">{m.playerName}</span>
+            <div className={cn(
+              "p-2 rounded-2xl max-w-[80%] break-all text-2xl",
+              m.playerId === currentUserId 
+                ? "bg-rose-500/20 text-rose-300 rounded-tr-none border border-rose-500/20" 
+                : "bg-zinc-800 text-zinc-200 rounded-tl-none border border-zinc-700"
+            )}>
+              {m.emoji}
+            </div>
+          </motion.div>
+        ))}
+        {messages.length === 0 && (
+          <div className="h-full flex items-center justify-center text-zinc-700 italic text-xs">
+            No messages sent...
+          </div>
+        )}
+      </div>
+      <div className="p-2 bg-zinc-950/50 border-t border-zinc-800 grid grid-cols-6 gap-1">
+        {emojis.map((e, idx) => (
+          <button
+            key={`${e}-${idx}`}
+            onClick={() => onSend(e)}
+            className="p-1.5 rounded-lg hover:bg-zinc-800 transition-colors text-xl"
+          >
+            {e}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const Announcement = ({
   text,
@@ -331,9 +371,8 @@ const PlayerCard = ({
         </div>
       </div>
 
-      {/* Suspicion + votes */}
+      {/* Votes (Suspicion Meter removed per request) */}
       <div className="space-y-2 relative z-10">
-        <SuspicionMeter score={player.suspicionScore} />
         {player.votesReceived > 0 && (
           <div className="flex gap-1 flex-wrap">
             {Array.from({ length: player.votesReceived }).map((_, i) => (
@@ -393,7 +432,7 @@ export default function App() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setMediaStream(stream);
         stream.getAudioTracks().forEach((t) => { t.enabled = false; });
-        setIsMuted(true);
+        Promise.resolve().then(() => setIsMuted(true));
       } catch {
         setError('Microphone access required to play.');
       }
@@ -401,7 +440,7 @@ export default function App() {
 
     s.on('state_update', (gs: GameState) => {
       setGameState(gs);
-      if (gs.id) setRoomId(gs.id);
+      if (gs.id) Promise.resolve().then(() => setRoomId(gs.id));
     });
     s.on('room_created', ({ roomId: rId }: { roomId: string }) => {
       setRoomId(rId); setJoined(true); setWaitingApproval(false);
@@ -530,8 +569,11 @@ export default function App() {
     navigator.clipboard.writeText(`${window.location.origin}?room=${roomId}`);
     setCopiedLink(true); setTimeout(() => setCopiedLink(false), 2000);
   };
+  const sendEmoji = (emoji: string) => {
+    if (!socket || !gameState || !joined) return;
+    socket.emit('send_emoji', { roomId: gameState.id, emoji });
+  };
 
-  // ── Apply pre-selected difficulty once in lobby ──────────
   useEffect(() => {
     if (joined && gameState && isHost && gameState.settings.difficulty !== preDifficulty && gameState.phase === 'LOBBY') {
       socket?.emit('update_settings', { roomId: gameState.id, settings: { difficulty: preDifficulty } });
@@ -570,8 +612,6 @@ export default function App() {
   if (!joined) return (
     <div className="min-h-screen w-full flex items-center justify-center bg-[#0a0a0c] p-6">
       <div className="w-full max-w-lg space-y-10">
-
-        {/* Hero */}
         <div className="text-center space-y-4">
           <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
             transition={{ type: 'spring', stiffness: 200 }}
@@ -587,7 +627,6 @@ export default function App() {
             className="text-zinc-500 font-medium">Speak carefully. Trust no one.</motion.p>
         </div>
 
-        {/* Flow toggle */}
         <div className="flex p-1 bg-zinc-900/60 border border-zinc-800 rounded-2xl">
           {(['HOST', 'JOIN'] as const).map((t) => (
             <button key={t} onClick={() => setFlow(t)}
@@ -598,11 +637,9 @@ export default function App() {
           ))}
         </div>
 
-        {/* Steps */}
         <div className="relative pl-12 space-y-10">
           <div className="absolute left-[21px] top-6 bottom-6 w-[2px] bg-zinc-800/80" />
 
-          {/* Step 1 — Name */}
           <div className="relative">
             <div className="absolute -left-12 w-11 h-11 rounded-full bg-zinc-900 border-2 border-zinc-800 flex items-center justify-center text-zinc-500 font-black z-10">1</div>
             <div className="space-y-3">
@@ -622,7 +659,6 @@ export default function App() {
           </div>
 
           {flow === 'HOST' ? (<>
-            {/* Step 2 — Difficulty */}
             <div className="relative">
               <div className="absolute -left-12 w-11 h-11 rounded-full bg-zinc-900 border-2 border-zinc-800 flex items-center justify-center text-zinc-500 font-black z-10">2</div>
               <div className="space-y-3">
@@ -642,7 +678,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Step 3 — Create */}
             <div className="relative">
               <div className="absolute -left-12 w-11 h-11 rounded-full bg-zinc-900 border-2 border-zinc-800 flex items-center justify-center text-zinc-500 font-black z-10">3</div>
               <div className="space-y-3">
@@ -657,7 +692,6 @@ export default function App() {
               </div>
             </div>
           </>) : (<>
-            {/* Step 2 — Room ID */}
             <div className="relative">
               <div className="absolute -left-12 w-11 h-11 rounded-full bg-zinc-900 border-2 border-zinc-800 flex items-center justify-center text-zinc-500 font-black z-10">2</div>
               <div className="space-y-3">
@@ -682,7 +716,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Step 3 — Join */}
             <div className="relative">
               <div className="absolute -left-12 w-11 h-11 rounded-full bg-zinc-900 border-2 border-zinc-800 flex items-center justify-center text-zinc-500 font-black z-10">3</div>
               <div className="space-y-3">
@@ -709,14 +742,10 @@ export default function App() {
     </div>
   );
 
-  // ─────────────────────────────────────────────────────────
-  // GAME ROOM
-  // ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col items-center">
       <AnimatePresence>{announcement && <Announcement text={announcement.text} type={announcement.type} />}</AnimatePresence>
 
-      {/* Pending player toasts */}
       {isHost && gameState?.pendingPlayers && gameState.pendingPlayers.length > 0 && (
         <div className="fixed top-4 right-4 z-50 space-y-2">
           <AnimatePresence>
@@ -727,7 +756,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Header ─────────────────────────────────────── */}
       <header className="w-full max-w-6xl px-6 py-4 border-b border-zinc-900 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-rose-500/10 rounded-xl">
@@ -751,7 +779,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Voice toggle */}
           <button onClick={() => setVoiceOn((v) => !v)}
             className={cn('p-2 rounded-lg border transition-all', voiceOn ? 'bg-zinc-900 border-zinc-700 text-zinc-300' : 'bg-zinc-900 border-zinc-800 text-zinc-600')}
             title={voiceOn ? 'Disable voice' : 'Enable voice'}>
@@ -782,13 +809,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* ── Main ───────────────────────────────────────── */}
       <main className="w-full max-w-6xl px-6 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
-
-        {/* ── Sidebar ─────────────────────────────────── */}
         <aside className="lg:col-span-1 space-y-5">
-
-          {/* Room card */}
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-5 space-y-3">
             <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Share Access</p>
             <div onClick={copyId} className="flex items-center justify-between cursor-pointer bg-zinc-950 border border-zinc-800 hover:border-rose-500/30 rounded-xl p-4 transition-all group">
@@ -801,7 +823,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Intel */}
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-5 space-y-4">
             <h3 className="font-black uppercase tracking-tight flex items-center gap-2 text-sm">
               <AlertCircle className="w-4 h-4 text-rose-400" /> Mission Intel
@@ -814,7 +835,6 @@ export default function App() {
               {me?.isImposter && <p className="text-[9px] text-rose-500/70 font-black uppercase mt-1 italic">You are the imposter — blend in.</p>}
             </div>
 
-            {/* Difficulty */}
             {gameState?.phase === 'LOBBY' && (
               <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-2">
                 <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Difficulty</p>
@@ -832,24 +852,31 @@ export default function App() {
 
             <ActivityLog logs={gameState?.activityLog ?? []} />
 
-            {/* Timer bar */}
-            {gameState?.phase !== 'LOBBY' && gameState?.phase !== 'RESULT' && (
+            <EmojiChat 
+              messages={gameState?.messages ?? []} 
+              currentUserId={socket?.id ?? ''} 
+              onSend={sendEmoji} 
+            />
+
+            {gameState && gameState.phase !== 'LOBBY' && gameState.phase !== 'RESULT' && (
               <div className="space-y-2">
                 <div className="flex justify-between text-[10px] font-black uppercase text-zinc-500">
-                  <span>Timer</span><span>{gameState?.timer ?? 0}s</span>
+                  <span>
+                    {gameState.phase === 'SPEAKING' ? `Round ${gameState.currentRound}/2` : 'Timer'}
+                  </span>
+                  <span>{gameState.timer ?? 0}s</span>
                 </div>
                 <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
                   <motion.div
-                    animate={{ width: `${((gameState?.timer ?? 0) / (gameState?.phase === 'WORD' ? 10 : gameState?.phase === 'SPEAKING' ? gameState.settings.roundTime : 25)) * 100}%` }}
+                    animate={{ width: `${((gameState.timer ?? 0) / (gameState.phase === 'WORD' ? 10 : gameState.phase === 'SPEAKING' ? gameState.settings.roundTime : 25)) * 100}%` }}
                     transition={{ duration: 1, ease: 'linear' }}
-                    className={cn('h-full rounded-full', (gameState?.timer ?? 0) <= 5 ? 'bg-rose-500 animate-pulse' : 'bg-rose-400')}
+                    className={cn('h-full rounded-full', (gameState.timer ?? 0) <= 5 ? 'bg-rose-500 animate-pulse' : 'bg-rose-400')}
                   />
                 </div>
               </div>
             )}
           </div>
 
-          {/* Context */}
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-5 space-y-2">
             <h3 className="font-black uppercase tracking-tight flex items-center gap-2 text-sm text-zinc-400">
               <BarChart2 className="w-4 h-4 text-rose-400" /> Status
@@ -866,12 +893,19 @@ export default function App() {
           </div>
         </aside>
 
-        {/* ── Player Grid ─────────────────────────────── */}
         <section className="lg:col-span-3 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-black uppercase tracking-tight">
               Personnel <span className="text-zinc-600 font-normal text-base normal-case tracking-normal">({gameState?.players.length} agents)</span>
             </h2>
+            {gameState?.phase === 'RESULT' && isHost && (
+              <button
+                onClick={resetRoom}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black uppercase tracking-tighter transition-all shadow-lg active:scale-95"
+              >
+                <RotateCcw className="w-4 h-4" /> Play Again
+              </button>
+            )}
           </div>
 
           {gameState?.phase === 'LOBBY' && (
@@ -899,7 +933,7 @@ export default function App() {
                   key={p.id}
                   player={p}
                   isMe={socket?.id === p.id}
-                  phase={gameState.phase}
+                  phase={gameState?.phase}
                   isHostMe={!!isHost}
                   onVote={castVote}
                   onKick={kickPlayer}
@@ -913,7 +947,6 @@ export default function App() {
         </section>
       </main>
 
-      {/* ── Lobby Bottom Bar ─────────────────────────── */}
       <AnimatePresence>
         {gameState?.phase === 'LOBBY' && (
           <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }}
