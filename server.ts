@@ -11,10 +11,13 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server(httpServer, {
-  cors: {
-    origin: process.env.FRONTEND_URL || 'https://emposter.netlify.app/' // e.g., https://emposter.netlify.app
-  }
+  // Allow frontend URL from environment, removing any trailing slash
+  const frontendOrigin = process.env.FRONTEND_URL 
+  ? process.env.FRONTEND_URL.replace(/\/$/, '')  // removes trailing slash
+  : '*';
+
+  const io = new Server(httpServer, { 
+  cors: { origin: frontendOrigin } 
 });
 
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
