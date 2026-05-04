@@ -393,6 +393,10 @@ export default function App() {
       }
     };
 
+    pc.onconnectionstatechange = () => {
+      console.log(`WebRTC connection with ${remoteId}: ${pc.connectionState}`);
+    };
+
     // Negotiation
     const myId = socketRef.current?.id;
     if (myId && myId < remoteId) {
@@ -444,9 +448,11 @@ export default function App() {
     });
     s.on('room_created', ({ roomId: rId }: { roomId: string }) => {
       setRoomId(rId); setJoined(true); setWaitingApproval(false);
+      requestMicInternal();
     });
     s.on('room_joined', ({ roomId: rId }: { roomId: string }) => {
       setRoomId(rId); setJoined(true); setWaitingApproval(false);
+      requestMicInternal();
     });
     s.on('waiting_for_host', () => setWaitingApproval(true));
     s.on('error', (msg: string) => { setError(msg); setWaitingApproval(false); });
@@ -490,7 +496,7 @@ export default function App() {
     });
 
     return () => { s.disconnect(); };
-  }, [createPeerConnection]);
+  }, [createPeerConnection, requestMicInternal]);
 
   // ── Announcement helper ──────────────────────────────────
   const announce = useCallback((text: string, type: typeof announcement extends null ? never : NonNullable<typeof announcement>['type'], duration = 3500) => {
@@ -553,6 +559,38 @@ export default function App() {
       Sounds.result();
     }
   }, [gameState, socket, mediaStream, announce]);
+
+  // Create WebRTC connections to new players
+  useEffect(() => {
+    if (!socketRef.current?.id || !gameState) return;
+
+    const currentPeerIds = Array.from(peerConnections.current.keys());
+    const myId = socketRef.current.id;
+    const newPlayers = gameState.players.filter(
+      (p) => p.id !== myId && !currentPeerIds.includes(p.id)
+    );
+
+    newPlayers.forEach((player) => {
+      createPeerConnection(player.id);
+    });
+  }, [gameState, createPeerConnection]);
+
+  // Control which remote audio is heard
+  useEffect(() => {
+    if (!gameState) return;
+
+    if (gameState.phase !== 'SPEAKING') {
+      remoteAudioRefs.current.forEach(audio => { audio.muted = true; });
+      return;
+    }
+
+    const speaker = gameState.players[gameState.currentSpeakerIndex];
+    if (!speaker) return;
+
+    remoteAudioRefs.current.forEach((audio, playerId) => {
+      audio.muted = (playerId !== speaker.id);
+    });
+  }, [gameState]);
 
   // ── Derived ──────────────────────────────────────────────
   const isHost = useMemo(() => gameState?.hostId === socket?.id, [gameState, socket]);
