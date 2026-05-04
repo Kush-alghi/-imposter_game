@@ -11,7 +11,11 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server(httpServer, { cors: { origin: '*' } });
+  const io = new Server(httpServer, {
+  cors: {
+    origin: process.env.FRONTEND_URL || 'https://emposter.netlify.app/' // e.g., https://emposter.netlify.app
+  }
+});
 
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
@@ -45,10 +49,8 @@ async function startServer() {
     phase: 'LOBBY' | 'WORD' | 'SPEAKING' | 'VOTING' | 'RESULT';
     secretWord: string;
     currentSpeakerIndex: number;
-    currentRound: number;
     timer: number;
     activityLog: ActivityLog[];
-    messages: { playerId: string; playerName: string; emoji: string; timestamp: number }[];
     settings: {
       maxPlayers: number;
       roundTime: number;
@@ -152,7 +154,6 @@ async function startServer() {
           pa.forEach((p, i) => { p.isSpeaking = i === 0; });
           s.phase = 'SPEAKING';
           s.currentSpeakerIndex = 0;
-          s.currentRound = 1;
           s.timer = s.settings.roundTime;
         }
       } else if (s.phase === 'SPEAKING') {
@@ -167,18 +168,9 @@ async function startServer() {
           s.currentSpeakerIndex += 1;
 
           if (s.currentSpeakerIndex >= s.players.size) {
-            if (s.currentRound < 2) {
-              s.currentRound += 1;
-              s.currentSpeakerIndex = 0;
-              const firstSpk = pa[0];
-              if (firstSpk) firstSpk.isSpeaking = true;
-              s.timer = s.settings.roundTime;
-              addLog(s, 'START', `Starting Round ${s.currentRound} of 2.`);
-            } else {
-              pa.forEach((p) => { p.isSpeaking = false; });
-              s.phase = 'VOTING';
-              s.timer = 25;
-            }
+            pa.forEach((p) => { p.isSpeaking = false; });
+            s.phase = 'VOTING';
+            s.timer = 25;
           } else {
             const nextSpk = pa[s.currentSpeakerIndex];
             if (nextSpk) nextSpk.isSpeaking = true;
@@ -213,14 +205,12 @@ async function startServer() {
         players: new Map(),
         pendingPlayers: new Map(),
         phase: 'LOBBY',
-      secretWord: '',
-      currentSpeakerIndex: -1,
-      currentRound: 1,
-      timer: 0,
-      activityLog: [],
-      messages: [],
-      settings: {
-        maxPlayers: 10,
+        secretWord: '',
+        currentSpeakerIndex: -1,
+        timer: 0,
+        activityLog: [],
+        settings: {
+          maxPlayers: 10,
           roundTime: 30,
           difficulty: difficulty || 'MEDIUM',
         },
@@ -326,10 +316,8 @@ async function startServer() {
       state.phase = 'WORD';
       state.timer = 10;
       state.currentSpeakerIndex = -1;
-      state.currentRound = 1;
-      state.messages = [];
 
-      addLog(state, 'START', `Mission initiated. Round 1 of 2. Difficulty: ${state.settings.difficulty}`);
+      addLog(state, 'START', `Mission initiated. Word difficulty: ${state.settings.difficulty}`);
       broadcastState(state);
       startPhaseLoop(roomId);
     });
@@ -371,28 +359,6 @@ async function startServer() {
       }
     });
 
-    socket.on('send_emoji', ({ roomId, emoji }) => {
-      const state = rooms.get(roomId);
-      if (!state) return;
-      const player = state.players.get(socket.id);
-      if (!player) return;
-
-      // Emoji-only check (allow multiple emojis)
-      const emojiRegex = /^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])+$/;
-      const cleanEmoji = emoji.trim();
-      if (!emojiRegex.test(cleanEmoji)) return;
-
-      state.messages.push({
-        playerId: socket.id,
-        playerName: player.name,
-        emoji: cleanEmoji.substring(0, 50), // limit length
-        timestamp: Date.now(),
-      });
-
-      if (state.messages.length > 30) state.messages.shift();
-      broadcastState(state);
-    });
-
     socket.on('reset_room', (roomId) => {
       const state = rooms.get(roomId);
       if (!state || state.hostId !== socket.id) return;
@@ -401,8 +367,6 @@ async function startServer() {
       state.timer = 0;
       state.secretWord = '';
       state.currentSpeakerIndex = -1;
-      state.currentRound = 1;
-      state.messages = [];
       state.players.forEach((p) => {
         p.isImposter = false; p.word = ''; p.isSpeaking = false;
         p.votesReceived = 0; p.suspicionScore = 0; p.hasVoted = false;

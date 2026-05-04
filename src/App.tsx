@@ -24,13 +24,6 @@ interface Player {
   word: string; isImposter: boolean; hasVoted: boolean;
 }
 
-interface Message {
-  playerId: string;
-  playerName: string;
-  emoji: string;
-  timestamp: number;
-}
-
 type Phase = 'LOBBY' | 'WORD' | 'SPEAKING' | 'VOTING' | 'RESULT';
 
 interface GameState {
@@ -38,11 +31,8 @@ interface GameState {
   players: Player[];
   pendingPlayers: { id: string; name: string }[];
   phase: Phase; secretWord: string;
-  currentSpeakerIndex: number;
-  currentRound: number;
-  timer: number;
+  currentSpeakerIndex: number; timer: number;
   activityLog: { id: string; type: string; message: string; timestamp: number }[];
-  messages: Message[];
   settings: { maxPlayers: number; roundTime: number; difficulty: 'EASY'|'MEDIUM'|'HARD'|'TOUGH' };
 }
 
@@ -139,64 +129,6 @@ const PendingRequest = ({
 );
 
 // ─── Announcement Overlay ─────────────────────────────────
-
-const EmojiChat = ({ messages, currentUserId, onSend }: { messages: Message[], currentUserId: string, onSend: (emoji: string) => void }) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const emojis = ['🕵️', '🤫', '👀', '🤐', '👺', '🔪', '🚨', '🤔', '🧐', '🗣️', '🔇', '🤝', '🔥', '💧', '✅', '❌'];
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages]);
-
-  return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl flex flex-col h-[400px] overflow-hidden">
-      <div className="p-3 border-b border-zinc-800 bg-zinc-950/50 flex items-center justify-between">
-        <p className="text-[10px] font-black uppercase text-zinc-500 tracking-widest flex items-center gap-2">
-          <Activity className="w-3 h-3" /> Secure Comms (Emoji Only)
-        </p>
-      </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide">
-        {messages.map((m, i) => (
-          <motion.div
-            key={`${m.timestamp}-${i}`}
-            initial={{ opacity: 0, x: m.playerId === currentUserId ? 10 : -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            className={cn(
-              "flex flex-col gap-1",
-              m.playerId === currentUserId ? "items-end" : "items-start"
-            )}
-          >
-            <span className="text-[9px] text-zinc-600 font-bold uppercase">{m.playerName}</span>
-            <div className={cn(
-              "p-2 rounded-2xl max-w-[80%] break-all text-2xl",
-              m.playerId === currentUserId 
-                ? "bg-rose-500/20 text-rose-300 rounded-tr-none border border-rose-500/20" 
-                : "bg-zinc-800 text-zinc-200 rounded-tl-none border border-zinc-700"
-            )}>
-              {m.emoji}
-            </div>
-          </motion.div>
-        ))}
-        {messages.length === 0 && (
-          <div className="h-full flex items-center justify-center text-zinc-700 italic text-xs">
-            No messages sent...
-          </div>
-        )}
-      </div>
-      <div className="p-2 bg-zinc-950/50 border-t border-zinc-800 grid grid-cols-6 gap-1">
-        {emojis.map((e, idx) => (
-          <button
-            key={`${e}-${idx}`}
-            onClick={() => onSend(e)}
-            className="p-1.5 rounded-lg hover:bg-zinc-800 transition-colors text-xl"
-          >
-            {e}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 const Announcement = ({
   text,
@@ -420,7 +352,9 @@ export default function App() {
 
   // ── Socket setup ────────────────────────────────────────
   useEffect(() => {
-    const s = io({ path: '/socket.io' });
+    // Inside the useEffect that sets up the socket:
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+    const s = io(backendUrl, { path: '/socket.io' });
     socketRef.current = s;
     Promise.resolve().then(() => setSocket(s));
 
@@ -568,10 +502,6 @@ export default function App() {
   const copyLink = () => {
     navigator.clipboard.writeText(`${window.location.origin}?room=${roomId}`);
     setCopiedLink(true); setTimeout(() => setCopiedLink(false), 2000);
-  };
-  const sendEmoji = (emoji: string) => {
-    if (!socket || !gameState || !joined) return;
-    socket.emit('send_emoji', { roomId: gameState.id, emoji });
   };
 
   useEffect(() => {
@@ -852,25 +782,16 @@ export default function App() {
 
             <ActivityLog logs={gameState?.activityLog ?? []} />
 
-            <EmojiChat 
-              messages={gameState?.messages ?? []} 
-              currentUserId={socket?.id ?? ''} 
-              onSend={sendEmoji} 
-            />
-
-            {gameState && gameState.phase !== 'LOBBY' && gameState.phase !== 'RESULT' && (
+            {gameState?.phase !== 'LOBBY' && gameState?.phase !== 'RESULT' && (
               <div className="space-y-2">
                 <div className="flex justify-between text-[10px] font-black uppercase text-zinc-500">
-                  <span>
-                    {gameState.phase === 'SPEAKING' ? `Round ${gameState.currentRound}/2` : 'Timer'}
-                  </span>
-                  <span>{gameState.timer ?? 0}s</span>
+                  <span>Timer</span><span>{gameState?.timer ?? 0}s</span>
                 </div>
                 <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
                   <motion.div
-                    animate={{ width: `${((gameState.timer ?? 0) / (gameState.phase === 'WORD' ? 10 : gameState.phase === 'SPEAKING' ? gameState.settings.roundTime : 25)) * 100}%` }}
+                    animate={{ width: `${((gameState?.timer ?? 0) / (gameState?.phase === 'WORD' ? 10 : gameState?.phase === 'SPEAKING' ? gameState.settings.roundTime : 25)) * 100}%` }}
                     transition={{ duration: 1, ease: 'linear' }}
-                    className={cn('h-full rounded-full', (gameState.timer ?? 0) <= 5 ? 'bg-rose-500 animate-pulse' : 'bg-rose-400')}
+                    className={cn('h-full rounded-full', (gameState?.timer ?? 0) <= 5 ? 'bg-rose-500 animate-pulse' : 'bg-rose-400')}
                   />
                 </div>
               </div>
@@ -898,14 +819,6 @@ export default function App() {
             <h2 className="text-xl font-black uppercase tracking-tight">
               Personnel <span className="text-zinc-600 font-normal text-base normal-case tracking-normal">({gameState?.players.length} agents)</span>
             </h2>
-            {gameState?.phase === 'RESULT' && isHost && (
-              <button
-                onClick={resetRoom}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black uppercase tracking-tighter transition-all shadow-lg active:scale-95"
-              >
-                <RotateCcw className="w-4 h-4" /> Play Again
-              </button>
-            )}
           </div>
 
           {gameState?.phase === 'LOBBY' && (
@@ -933,7 +846,7 @@ export default function App() {
                   key={p.id}
                   player={p}
                   isMe={socket?.id === p.id}
-                  phase={gameState?.phase}
+                  phase={gameState.phase}
                   isHostMe={!!isHost}
                   onVote={castVote}
                   onKick={kickPlayer}
