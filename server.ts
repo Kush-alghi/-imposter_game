@@ -52,6 +52,8 @@ async function startServer() {
     phase: 'LOBBY' | 'WORD' | 'SPEAKING' | 'VOTING' | 'RESULT';
     secretWord: string;
     currentSpeakerIndex: number;
+    currentRound: number;
+    turnsInPhase?: number;
     timer: number;
     activityLog: ActivityLog[];
     settings: {
@@ -198,9 +200,8 @@ async function startServer() {
       if (s.phase === 'WORD') {
         if (s.timer <= 0) {
           const pa = Array.from(s.players.values());
-          pa.forEach((p, i) => { p.isSpeaking = i === 0; });
+          pa.forEach((p, i) => { p.isSpeaking = i === s.currentSpeakerIndex; });
           s.phase = 'SPEAKING';
-          s.currentSpeakerIndex = 0;
           s.timer = s.settings.roundTime;
         }
       } else if (s.phase === 'SPEAKING') {
@@ -212,13 +213,21 @@ async function startServer() {
 
         if (s.timer <= 0) {
           if (spk) spk.isSpeaking = false;
-          s.currentSpeakerIndex += 1;
+          s.currentSpeakerIndex = (s.currentSpeakerIndex + 1) % pa.length;
 
-          if (s.currentSpeakerIndex >= s.players.size) {
+          if (s.turnsInPhase === undefined) s.turnsInPhase = 0;
+          s.turnsInPhase++;
+
+          if (s.turnsInPhase >= s.players.size * 2) {
             pa.forEach((p) => { p.isSpeaking = false; });
             s.phase = 'VOTING';
             s.timer = 25;
+            s.turnsInPhase = 0;
           } else {
+            if (s.turnsInPhase === s.players.size) {
+              s.currentRound = 2;
+              addLog(s, 'START', 'Round 2 of speaking begins.');
+            }
             const nextSpk = pa[s.currentSpeakerIndex];
             if (nextSpk) nextSpk.isSpeaking = true;
             s.timer = s.settings.roundTime;
@@ -254,6 +263,7 @@ async function startServer() {
         phase: 'LOBBY',
         secretWord: '',
         currentSpeakerIndex: -1,
+        currentRound: 0,
         timer: 0,
         activityLog: [],
         settings: {
@@ -375,7 +385,9 @@ async function startServer() {
 
       state.phase = 'WORD';
       state.timer = 10;
-      state.currentSpeakerIndex = -1;
+      state.currentSpeakerIndex = Math.floor(Math.random() * pa.length);
+      state.currentRound = 1;
+      state.turnsInPhase = 0;
 
       addLog(state, 'START', `Mission initiated. Word difficulty: ${state.settings.difficulty}`);
       broadcastState(state);
@@ -427,6 +439,8 @@ async function startServer() {
       state.timer = 0;
       state.secretWord = '';
       state.currentSpeakerIndex = -1;
+      state.currentRound = 0;
+      state.turnsInPhase = 0;
       state.players.forEach((p) => {
         p.isImposter = false; p.word = ''; p.isSpeaking = false;
         p.votesReceived = 0; p.suspicionScore = 0; p.hasVoted = false;
