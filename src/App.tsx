@@ -350,9 +350,86 @@ export default function App() {
   const lastAnnKey = useRef('');
   const announcementTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── WebRTC Refs ──
+  const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const localStreamRef = useRef<MediaStream | null>(null);
+
+  const rtcConfiguration = useMemo(() => ({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  }), []);
+
+  // ── WebRTC Helper ──
+  const createPeerConnection = useCallback(async (remoteId: string) => {
+    const pc = new RTCPeerConnection(rtcConfiguration);
+    peerConnections.current.set(remoteId, pc);
+
+    // Add local audio track if already available
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current!);
+      });
+    }
+
+    // When remote stream arrives, attach to a new Audio element
+    pc.ontrack = (event) => {
+      const [remoteStream] = event.streams;
+      let audioEl = remoteAudioRefs.current.get(remoteId);
+      if (!audioEl) {
+        audioEl = new Audio();
+        audioEl.autoplay = true;
+        audioEl.id = `audio-${remoteId}`;
+        document.body.appendChild(audioEl);
+        remoteAudioRefs.current.set(remoteId, audioEl);
+      }
+      audioEl.srcObject = remoteStream;
+      audioEl.muted = true;
+    };
+
+    // ICE candidate handling
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socketRef.current?.emit('webrtc_ice_candidate', { toId: remoteId, candidate: event.candidate });
+      }
+    };
+
+    // Negotiation
+    const myId = socketRef.current?.id;
+    if (myId && myId < remoteId) {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socketRef.current?.emit('webrtc_offer', { toId: remoteId, offer });
+      } catch (err) {
+        console.error('Error creating offer:', err);
+      }
+    }
+
+    return pc;
+  }, [rtcConfiguration]);
+
+  // ── Mic Request ──
+  const requestMicInternal = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setMediaStream(stream);
+      localStreamRef.current = stream;
+      stream.getAudioTracks().forEach((t) => { t.enabled = false; });
+      setIsMuted(true);
+
+      // Add track to all existing peer connections
+      peerConnections.current.forEach(pc => {
+        stream.getTracks().forEach(track => {
+          pc.addTrack(track, stream);
+        });
+      });
+    } catch {
+      setError('Microphone access required to play.');
+    }
+  }, []);
+
   // ── Socket setup ────────────────────────────────────────
   useEffect(() => {
-    // Inside the useEffect that sets up the socket:
     const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
     const s = io(backendUrl, { path: '/socket.io' });
     socketRef.current = s;
@@ -361,34 +438,59 @@ export default function App() {
     const urlRoomId = new URLSearchParams(window.location.search).get('room');
     if (urlRoomId) Promise.resolve().then(() => setRoomId(urlRoomId.toUpperCase()));
 
-    const requestMicInternal = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setMediaStream(stream);
-        stream.getAudioTracks().forEach((t) => { t.enabled = false; });
-        Promise.resolve().then(() => setIsMuted(true));
-      } catch {
-        setError('Microphone access required to play.');
-      }
-    };
-
     s.on('state_update', (gs: GameState) => {
       setGameState(gs);
       if (gs.id) Promise.resolve().then(() => setRoomId(gs.id));
     });
     s.on('room_created', ({ roomId: rId }: { roomId: string }) => {
       setRoomId(rId); setJoined(true); setWaitingApproval(false);
-      requestMicInternal();
     });
     s.on('room_joined', ({ roomId: rId }: { roomId: string }) => {
       setRoomId(rId); setJoined(true); setWaitingApproval(false);
-      requestMicInternal();
     });
     s.on('waiting_for_host', () => setWaitingApproval(true));
     s.on('error', (msg: string) => { setError(msg); setWaitingApproval(false); });
 
+    // ── WebRTC Signaling ──
+    s.on('webrtc_offer', async ({ fromId, offer }) => {
+      let pc = peerConnections.current.get(fromId);
+      if (!pc) {
+        pc = await createPeerConnection(fromId);
+      }
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        s.emit('webrtc_answer', { toId: fromId, answer });
+      } catch (err) {
+        console.error('Error handling webrtc_offer:', err);
+      }
+    });
+
+    s.on('webrtc_answer', async ({ fromId, answer }) => {
+      const pc = peerConnections.current.get(fromId);
+      if (pc) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        } catch (err) {
+          console.error('Error handling webrtc_answer:', err);
+        }
+      }
+    });
+
+    s.on('webrtc_ice_candidate', async ({ fromId, candidate }) => {
+      const pc = peerConnections.current.get(fromId);
+      if (pc) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error('Error adding ice candidate:', err);
+        }
+      }
+    });
+
     return () => { s.disconnect(); };
-  }, []);
+  }, [createPeerConnection]);
 
   // ── Announcement helper ──────────────────────────────────
   const announce = useCallback((text: string, type: typeof announcement extends null ? never : NonNullable<typeof announcement>['type'], duration = 3500) => {
@@ -457,9 +559,11 @@ export default function App() {
   const me = useMemo(() => gameState?.players.find((p) => p.id === socket?.id), [gameState, socket]);
 
   const toggleMute = useCallback(() => {
-    mediaStream?.getAudioTracks().forEach((t) => { t.enabled = isMuted; });
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = isMuted; });
+    }
     setIsMuted((m) => !m);
-  }, [mediaStream, isMuted]);
+  }, [isMuted]);
 
   // ── Socket emitters ──────────────────────────────────────
   const createRoom = () => {
